@@ -72,31 +72,39 @@ class SERDataset(Dataset):
 class SERClassifier(nn.Module):
     def __init__(self, max_token_len:int, n_features:int):
         super(SERClassifier, self).__init__()
+        self.dimension = 128
+        self.max_token_len = max_token_len
 
-        kernel_size = 3
-        self.conv = nn.Conv1d(in_channels=max_token_len, out_channels=200, kernel_size=(kernel_size,), padding=0)
-        self.maxpool = nn.MaxPool1d(kernel_size=2, stride=2, padding=1)
+        self.lstm = nn.LSTM(input_size=n_features,
+                            hidden_size=self.dimension,
+                            num_layers=1,
+                            batch_first=True,
+                            bidirectional=True)
+        self.drop = nn.Dropout(p=0.5)
 
-        # The LSTM takes word embeddings as inputs, and outputs hidden states
-        # with dimensionality hidden_dim
-        self.lstm = nn.LSTM(n_features, 25, batch_first=True)
-        self.fc1 = nn.Linear(25, 15)
+        self.activation_classifier = nn.Linear(2 * self.dimension, 1)
+        self.valence_classifier = nn.Linear(2 * self.dimension, 1)
 
 
     def forward(self, inputs):
-        # print(inputs.shape)
-        # conv_out = F.relu(self.conv(inputs))
-        # print(conv_out.shape)
-        # pooled = self.maxpool(conv_out)
-        # print(pooled.shape)
 
-        lstm_out, (h_n, c_n) = self.lstm(inputs)
-        print(lstm_out.shape)
+        output, (h_n, c_n) = self.lstm(inputs)
 
-        out = F.relu(self.fc1(lstm_out))
-        print(out.shape)
+        out_forward = output[range(len(output)), self.max_token_len - 1, :self.dimension]
+        out_reverse = output[:, 0, self.dimension:]
+        out_reduced = torch.cat((out_forward, out_reverse), 1)
+        text_fea = self.drop(out_reduced)
 
-        return
+        text_valence = self.valence_classifier(text_fea)
+        text_valence = torch.squeeze(text_valence, 1)
+        valance_out = torch.sigmoid(text_valence)
+
+        text_activation = self.activation_classifier(text_fea)
+        text_activation = torch.squeeze(text_activation, 1)
+        activation_out = torch.sigmoid(text_activation)
+
+
+        return (valance_out, activation_out)
 
 
 
@@ -104,6 +112,7 @@ if __name__ == '__main__':
 
     train_file = "./ser_traindev/train.json"
     dataset = SERDataset(train_file)
+    device = torch.device('cpu')
 
     # train-test split of the dataset
     train_size = int(0.8 * len(dataset))
@@ -123,8 +132,9 @@ if __name__ == '__main__':
     for epoch in range(num_epochs):
         for i, sample in enumerate(train_loader):
             input = sample['input']
+            input = input.to(device)
             output = model(input)
-
+            print(output)
             break
         break
 
